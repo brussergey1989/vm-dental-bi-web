@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BI-VM</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    #loader {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #6b6a63; background: #fafaf8;
+    }
+    iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: none; }
+  </style>
+</head>
+<body>
+  <div id="loader">Загрузка…</div>
+  <iframe src="https://script.google.com/macros/s/AKfycby3o5H3hr6dJ5O9ZBtkeCTHMKJa5WHbG4fPFAxvlN3SP5ERU-S3iOiSQzipkAdTybaZfA/exec"
+    onload="document.getElementById('loader').style.display='none'"></iframe>
+</body>
+</html>
