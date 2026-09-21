@@ -27,7 +27,23 @@
     // ловим это сообщение и растягиваем iframe под контент, чтобы скроллилась только
     // родительская страница (нативно, без двойного скролла и тормозов).
     var iframe = document.getElementById('app');
+    var sessionKey = 'biVmSession';
     window.addEventListener('message', function (e) {
+      if (e.source !== iframe.contentWindow) return;
+      if (e.data && e.data.type === 'bi-session-store') {
+        localStorage.setItem(sessionKey, JSON.stringify(e.data.session));
+        return;
+      }
+      if (e.data && e.data.type === 'bi-session-clear') {
+        localStorage.removeItem(sessionKey);
+        return;
+      }
+      if (e.data && e.data.type === 'bi-session-request') {
+        var session = null;
+        try { session = JSON.parse(localStorage.getItem(sessionKey) || 'null'); } catch (ignore) {}
+        iframe.contentWindow.postMessage({ type: 'bi-session-value', session: session }, '*');
+        return;
+      }
       var h = e.data && e.data.fdHeight;
       if (typeof h === 'number' && h > 200 && h < 50000) {
         document.body.classList.add('autosize');
