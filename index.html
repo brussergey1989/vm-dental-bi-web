@@ -14,6 +14,8 @@
     }
     iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: none; }
     body.autosize iframe { position: static; width: 100%; }
+    body.viewport-layout { height: 100%; overflow: hidden; }
+    body.viewport-layout iframe { position: fixed; inset: 0; width: 100%; height: 100% !important; }
   </style>
 </head>
 <body>
@@ -28,7 +30,30 @@
     // родительская страница (нативно, без двойного скролла и тормозов).
     var iframe = document.getElementById('app');
     var sessionKey = 'biVmSession';
+    // The app asks from its Apps Script sandbox. Send CSS viewport dimensions,
+    // not screen pixels, and keep the outer frame independent of content height.
+    var viewportClient = null, viewportOrigin = '', viewportRequest = 0;
+    function sendViewport() {
+      if (!viewportClient) return;
+      viewportClient.postMessage({type:'bi-viewport', height:window.innerHeight,
+        width:document.documentElement.clientWidth}, viewportOrigin);
+    }
+    function scheduleViewport() {
+      cancelAnimationFrame(viewportRequest);
+      viewportRequest = requestAnimationFrame(sendViewport);
+    }
+    window.addEventListener('resize', scheduleViewport);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleViewport);
     window.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'bi-viewport-request' &&
+          (e.origin === 'https://script.google.com' || /^https:\/\/[a-z0-9-]+\.googleusercontent\.com$/.test(e.origin))) {
+        viewportClient = e.source; viewportOrigin = e.origin;
+        document.body.classList.remove('autosize');
+        document.body.classList.add('viewport-layout');
+        iframe.style.removeProperty('height');
+        sendViewport();
+        return;
+      }
       if (e.source !== iframe.contentWindow) return;
       if (e.data && e.data.type === 'bi-session-store') {
         localStorage.setItem(sessionKey, JSON.stringify(e.data.session));
@@ -45,7 +70,7 @@
         return;
       }
       var h = e.data && e.data.fdHeight;
-      if (typeof h === 'number' && h > 200 && h < 50000) {
+      if (!viewportClient && typeof h === 'number' && h > 200 && h < 50000) {
         document.body.classList.add('autosize');
         iframe.style.height = h + 'px';
       }
