@@ -33,6 +33,17 @@
     // The app asks from its Apps Script sandbox. Send CSS viewport dimensions,
     // not screen pixels, and keep the outer frame independent of content height.
     var viewportClient = null, viewportOrigin = '', viewportRequest = 0;
+    var systemReloadRequest = '';
+    function isAppDescendant(source) {
+      try {
+        for (var depth = 0; source && depth < 8; depth++) {
+          if (source === iframe.contentWindow) return true;
+          if (source.parent === source) break;
+          source = source.parent;
+        }
+      } catch (ignore) {}
+      return false;
+    }
     function sendViewport() {
       if (!viewportClient) return;
       viewportClient.postMessage({type:'bi-viewport', height:window.innerHeight,
@@ -45,6 +56,17 @@
     window.addEventListener('resize', scheduleViewport);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleViewport);
     window.addEventListener('message', function (e) {
+      // Only the registered app sandbox can request a user-confirmed page reload.
+      if (e.data && e.data.type === 'bi-system-reload-request' &&
+          e.source === viewportClient && e.origin === viewportOrigin &&
+          isAppDescendant(e.source) &&
+          /^[a-z0-9-]{24,80}$/i.test(String(e.data.requestId || ''))) {
+        if (systemReloadRequest === e.data.requestId) return;
+        systemReloadRequest = e.data.requestId;
+        e.source.postMessage({type:'bi-system-reload-accepted',requestId:e.data.requestId}, e.origin);
+        setTimeout(function () { window.location.reload(); }, 0);
+        return;
+      }
       if (e.data && e.data.type === 'bi-viewport-request' &&
           (e.origin === 'https://script.google.com' || /^https:\/\/[a-z0-9-]+\.googleusercontent\.com$/.test(e.origin))) {
         viewportClient = e.source; viewportOrigin = e.origin;
