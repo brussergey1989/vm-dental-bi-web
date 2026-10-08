@@ -20,7 +20,7 @@
 </head>
 <body>
   <div id="loader">Загрузка…</div>
-  <iframe id="app" src="https://script.google.com/macros/s/AKfycby3o5H3hr6dJ5O9ZBtkeCTHMKJa5WHbG4fPFAxvlN3SP5ERU-S3iOiSQzipkAdTybaZfA/exec"
+  <iframe id="app" data-src="https://script.google.com/macros/s/AKfycby3o5H3hr6dJ5O9ZBtkeCTHMKJa5WHbG4fPFAxvlN3SP5ERU-S3iOiSQzipkAdTybaZfA/exec"
     onload="document.getElementById('loader').style.display='none'"></iframe>
   <script>
     // ─── АВТОРАЗМЕР IFRAME ───────────────────────────────────────
@@ -29,6 +29,13 @@
     // ловим это сообщение и растягиваем iframe под контент, чтобы скроллилась только
     // родительская страница (нативно, без двойного скролла и тормозов).
     var iframe = document.getElementById('app');
+    // Forward only an opaque request ID; access is checked inside the BI after login.
+    var appUrl = new URL(iframe.getAttribute('data-src'));
+    var requestId = new URLSearchParams(window.location.search).get('financeRequest');
+    if (requestId && /^[a-zA-Z0-9-]{1,100}$/.test(requestId)) {
+      appUrl.searchParams.set('financeRequest', requestId);
+    }
+    iframe.src = appUrl.href;
     var sessionKey = 'biVmSession';
     // The app asks from its Apps Script sandbox. Send CSS viewport dimensions,
     // not screen pixels, and keep the outer frame independent of content height.
