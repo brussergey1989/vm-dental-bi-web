@@ -13,9 +13,12 @@ function zipGuard(bytes){
  }
  throw Error('Архив документа повреждён или защищён паролем.');
 }
-async function showPdf(bytes){
+async function loadPdf(bytes){
  const pdfjs=await import('./vendor/pdf.mjs');pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.mjs',import.meta.url).href;
- const pdf=await pdfjs.getDocument({data:bytes,isEvalSupported:false,useSystemFonts:true,disableFontFace:true,stopAtErrors:true}).promise;let number=1,rendering=false;
+ return pdfjs.getDocument({data:bytes,isEvalSupported:false,useSystemFonts:true,disableFontFace:true,stopAtErrors:true}).promise;
+}
+async function showPdf(bytes){
+ const pdf=await loadPdf(bytes);let number=1,rendering=false;
  printPdf=pdf;const back=document.createElement('button'),next=document.createElement('button'),label=document.createElement('span');back.textContent='←';back.setAttribute('aria-label','Предыдущая страница');next.textContent='→';next.setAttribute('aria-label','Следующая страница');controls.replaceChildren(back,label,next);
  async function page(){if(rendering)return;rendering=true;back.disabled=next.disabled=true;try{message('Открываем страницу…');const p=await pdf.getPage(number),original=p.getViewport({scale:1}),scale=Math.min(1.7,Math.sqrt(2500000/(original.width*original.height))),viewport=p.getViewport({scale}),canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);await p.render({canvasContext:canvas.getContext('2d'),viewport}).promise;content.replaceChildren(canvas);label.textContent=number+' / '+pdf.numPages;message('');p.cleanup();}finally{rendering=false;back.disabled=number<=1;next.disabled=number>=pdf.numPages;}}
  back.onclick=()=>{if(number>1&&!rendering){number--;page().catch(e=>message(e.message));}};next.onclick=()=>{if(number<pdf.numPages&&!rendering){number++;page().catch(e=>message(e.message));}};await page();
@@ -31,9 +34,13 @@ async function showTextDocument(bytes,ext){
 }
 window.addEventListener('message',async event=>{
  if(event.source===parent&&allowed(event.origin)&&event.data?.type==='request-document-print'&&event.data.nonce===nonce){await printDocument();return;}
+ if(event.source===parent&&allowed(event.origin)&&event.data?.type==='request-document-print-batch'&&event.data.nonce===nonce){
+  await printBatch(event.data,event.origin);
+  return;
+ }
  if(accepted||event.source!==parent||!allowed(event.origin)||event.data?.type!=='request-document-bytes'||event.data.nonce!==nonce)return;
  accepted=true;
- try{const file=event.data.file,bytes=new Uint8Array(file.bytes),ext=String(file.name).split('.').pop().toLowerCase();if(!bytes.length||bytes.length>5*1024*1024)throw Error('Размер файла — до 5 МБ.');document.getElementById('name').textContent=file.name;zipGuard(bytes);
+ try{const file=event.data.file,bytes=new Uint8Array(file.bytes),ext=String(file.name).split('.').pop().toLowerCase();const limit=ext==='pdf'&&file.printable===true?10:5;if(!bytes.length||bytes.length>limit*1024*1024)throw Error('Размер файла — до '+limit+' МБ.');document.getElementById('name').textContent=file.name;zipGuard(bytes);
   if(ext==='pdf'){await showPdf(bytes);canPrint=file.printable===true;if(canPrint){const print=document.createElement('button');print.textContent='Печать';print.onclick=printDocument;controls.append(print);if(file.autoPrint)await printDocument();}}else if(/^(jpe?g)$/.test(ext)){const image=document.createElement('img');image.alt=file.name;objectUrl=URL.createObjectURL(new Blob([bytes],{type:'image/jpeg'}));image.src=objectUrl;content.replaceChildren(image);message('');}
   else if(['xlsx','xls','ods','csv'].includes(ext))await showSheet(bytes);else if(['docx','odt'].includes(ext))await showTextDocument(bytes,ext);else throw Error('Формат не поддерживается для просмотра. Скачайте оригинал.');
  }catch(error){message('Не удалось открыть документ. '+(error.message||'Скачайте оригинал.'));}
@@ -50,5 +57,64 @@ async function printDocument(){
   message('');window.print();
  }catch(error){message('Откройте скачанный PDF и выберите печать в просмотрщике. '+(error.message||''));}
  finally{printBusy=false;}
+}
+async function printBatch(data,origin){
+ if(!canPrint||typeof data.jobId!=='string')return;
+ function respond(stage,message){
+  parent.postMessage({type:'request-document-print-batch-status',nonce,jobId:data.jobId,stage,message},origin);
+ }
+ if(printBusy){respond('failed','Дождитесь завершения текущей печати.');return;}
+ printBusy=true;
+ let pages;
+ try{
+  const files=data.files;
+  if(!Array.isArray(files)||!files.length||files.length>40)throw Error('Выберите от 1 до 40 PDF.');
+  let bytesTotal=0;
+  for(const file of files){
+   if(file?.mime!=='application/pdf'||!(file.bytes instanceof Uint8Array)||!file.bytes.length||file.bytes.length>10*1024*1024)throw Error('Один из PDF недоступен для печати.');
+   bytesTotal+=file.bytes.length;
+  }
+  if(bytesTotal>45*1024*1024)throw Error('Размер задания превышает 45 МБ.');
+  respond('started');
+  document.getElementById('print-content')?.remove();
+  pages=document.createElement('div');
+  pages.id='print-content';
+  pages.className='print-batch';
+  document.body.append(pages);
+  let count=0;
+  for(const [index,file] of files.entries()){
+   message('Готовим документ '+(index+1)+' из '+files.length+'…');
+   const pdf=await loadPdf(file.bytes);
+   try{
+    count+=pdf.numPages;
+    if(count>100)throw Error('Для одного задания выберите до 100 страниц.');
+    for(let number=1;number<=pdf.numPages;number++){
+     const page=await pdf.getPage(number);
+     const size=page.getViewport({scale:1});
+     const scale=Math.min(1.5,Math.sqrt(2000000/(size.width*size.height)));
+     const viewport=page.getViewport({scale});
+     const canvas=document.createElement('canvas');
+     canvas.width=Math.ceil(viewport.width);
+     canvas.height=Math.ceil(viewport.height);
+     await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+     const sheet=document.createElement('section');
+     sheet.className='print-sheet';
+     sheet.append(canvas);
+     pages.append(sheet);
+     page.cleanup();
+    }
+   }finally{await pdf.destroy();}
+  }
+  message('');
+  window.print();
+  respond('finished');
+ }catch(error){
+  const detail=error.message||'Не удалось подготовить документы.';
+  message(detail);
+  respond('failed',detail);
+ }finally{
+  pages?.remove();
+  printBusy=false;
+ }
 }
 window.addEventListener('afterprint',()=>document.getElementById('print-content')?.remove());
